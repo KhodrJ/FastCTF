@@ -11,12 +11,12 @@
  * 
  *    FastCTF: A Robust Solver for Conduction Transfer Function Coefficients
  * 
- *    Date:   
+ *    Date: 28 March, 2021   
  *    Author: Khodr Jaber
  * 
  *    
  * 
- *    A simple code that computes both conduction transfer functions and response factors based on Taylor series expansions of the Laplace domain solution to the one-dimensional heat equation. The inversion of this approximated solution is performed by generating an s-transfer function and applying the residue theorem. The z-transfer function is recovered easily.
+ *    A simple code that computes both conduction transfer functions and response factors based on Taylor series expansions of the Laplace domain solution to the one-dimensional heat equation. The inversion of this approximated solution is performed by generating a polynomial s-transfer function and applying the residue theorem. The z-transfer function is then applied to recover the CTFs and response factors.
  * 
  * ==================================================================================
 */
@@ -50,6 +50,31 @@ Poly GetSeriesT_10(int ord, double L, double k, double alpha)
 	return Poly(coeffs);
 }
 
+Poly TFtoTaylor(Poly Num, Poly Den, int length)
+{
+	VCD coeffs = {};
+
+	coeffs.push_back(Num.coeffs[0] / Den.coeffs[0]);
+	for (int i = 1; i < Den.coeffs.size(); i++)
+	{
+		cdouble sum = 0;
+		for (int j = 0; j < i; j++)
+			sum += coeffs[j] * Den.coeffs[i-j];
+
+		coeffs.push_back( (Num.coeffs[i] - sum) / Den.coeffs[0] );
+	}
+	for (int i = 0; i < length; i++)
+	{
+		cdouble sum = 0;
+		for (int j = 0; j < Den.coeffs.size()-1; j++)
+			sum += coeffs[j+i+1] * Den.coeffs[Den.coeffs.size()-1-j];
+
+		coeffs.push_back( -sum / Den.coeffs[0] );
+	}
+
+	return Poly(coeffs);
+}
+
 std::pair<Poly,Poly> ZTransform(cdouble res, cdouble root, int mult)
 {
 	double A = -TIME_STEP * root.real();
@@ -79,16 +104,16 @@ std::pair<Poly,Poly> ZTransform(cdouble res, cdouble root, int mult)
 	return std::make_pair(Num, Den);
 }
 
-std::tuple<Poly, Poly, Poly> GetZTF(Poly Num, Poly Den, double U)
+std::tuple<Poly, Poly, Poly> GetZTF(Poly Num, Poly Den, double U, int N_k)
 {
 	// First:	Numerator of z-transfer function.
 	// Second:	Denominator of z-transfer function.
 	// Third:	Response factors.
-
+    
 	std::pair<VCD, std::vector<int>> RaR = RootsPoly(Den);
 	VCD roots = RaR.first;
 	std::vector<int> reps = RaR.second;
-
+    
 	int N = roots.size();
 	Poly ZNum(VCD{0.0});
 	Poly ZDen(VCD{1.0});
@@ -117,6 +142,7 @@ std::tuple<Poly, Poly, Poly> GetZTF(Poly Num, Poly Den, double U)
 		ZDen = ZDen * ztf.second;
 	}
 
+	// Assemble.
 	Poly ZM_bar = Poly(VCD {0.0});
 	for (int i = 0; i < N; i++)
 		ZM_bar = ZM_bar + M_bar[i];
@@ -137,88 +163,9 @@ std::tuple<Poly, Poly, Poly> GetZTF(Poly Num, Poly Den, double U)
 	// Compute response factors.
 	Poly Yk = Poly(VCD {0});
 	Poly Ykin = Poly(VCD {0});
-	for (int i = 0; i < 500; i++)
-	{
-		cdouble Yi = 0.0;
-		if (i == 0)
-		{
-			double dt = TIME_STEP;
-			double tp1 = dt;
-			Yi = ((alpha_2 / TIME_STEP)*(tp1) + alpha_1) / dt;
-			for (int j = 0; j < N; j++)
-			{
-				if (roots[j] != c(0,0))
-				{
-					cdouble res = Residue(roots[j], 1, 1, Num, Den);
-
-					// Real.
-					if (roots[j].imag() == 0.0)
-						Yi += res.real()*exp(roots[j]*tp1) / dt;
-
-					// Complex.
-					if (roots[j].imag() != 0.0)
-						Yi += 2*exp(roots[j].real()*tp1)*(res.real()*cos(roots[j].imag()*tp1) + res.imag()*sin(roots[j].imag()*tp1)) / dt;
-
-
-				}
-			}
-		}
-		else
-		{
-			double dt = TIME_STEP;
-			double t = i*dt;
-			double tm1 = t-dt;
-			double tp1 = t+dt;
-			Yi = ((alpha_2 / TIME_STEP)*(tm1) + alpha_1) / dt;
-			Yi += -2.0*((alpha_2 / TIME_STEP)*(t) + alpha_1) / dt;
-			Yi += ((alpha_2 / TIME_STEP)*(tp1) + alpha_1) / dt;
-			for (int j = 0; j < N; j++)
-			{
-				if (roots[j] != c(0,0))
-				{
-					cdouble res = Residue(roots[j], 1, 1, Num, Den);
-
-					// Real.
-					if (roots[j].imag() == 0.0)
-					{
-						Yi += res.real()*exp(roots[j]*tm1) / dt;
-						Yi += -2*res.real()*exp(roots[j]*t) / dt;
-						Yi += res.real()*exp(roots[j]*tp1) / dt;
-					}
-
-					// Complex.
-					if (roots[j].imag() != 0.0)
-					{
-						Yi += 2*exp(roots[j].real()*tm1)*(res.real()*cos(roots[j].imag()*tm1) + res.imag()*sin(roots[j].imag()*tm1)) / dt;
-
-						Yi += -2*2*exp(roots[j].real()*t)*(res.real()*cos(roots[j].imag()*t) + res.imag()*sin(roots[j].imag()*t)) / dt;
-						Yi += 2*exp(roots[j].real()*tp1)*(res.real()*cos(roots[j].imag()*tp1) + res.imag()*sin(roots[j].imag()*tp1)) / dt;
-
-					}
-				}
-			}
-		}
-
-		Yk.coeffs.push_back(Yi);
-		// std::cout << Yi / 5.674465897389 << std::endl; // For comparison with tests performed in imperial units.
-	}
-
-	std::ifstream inYk; inYk.open("inyk.txt");
-	int Nyk; inYk >> Nyk;
-	for (int i = 0; i < Nyk; i++)
-	{
-		cdouble Ykin_i = c(0,0);
-		inYk >> Ykin_i;
-		Ykin.coeffs.push_back(Ykin_i);
-	}
-
-	std::ofstream outYk; outYk.open("tmp2");
-	for (int i = 0; i < 1000; i++)
-	{
-		double wk = pow(10.00, -8+i*(8.0-4.0)/1000);
-		outYk << wk << " " << fabs( Yk.Eval(exp(-c(0.0, wk*TIME_STEP))) ) << " " << arg( Yk.Eval(exp(-c(0.0, wk*TIME_STEP))) ) << " " << fabs( Ykin.Eval(exp(-c(0.0, wk*TIME_STEP))) ) << " " << arg( Ykin.Eval(exp(-c(0.0, wk*TIME_STEP))) ) << std::endl;
-	}
-	outYk.close();
+	Poly ZNum_F = ZNum; ZNum_F.Flip();
+	Poly ZDen_F = ZDen; ZDen_F.Flip();
+	Yk = TFtoTaylor(ZNum_F, ZDen_F, N_k);
 
 	return std::make_tuple(ZNum, ZDen, Yk);
 }
@@ -282,7 +229,7 @@ Poly TaylorRecover(Poly Num, Poly Den, Poly Q)
 
 int main(int argc, char *argv[])
 {
-	int			i, j, N, N_layers, ord, f_ord;
+	int			i, j, N, N_layers, ord, p_ord, N_k;
 	double			R_o, R_i, **layer_dat;
 	std::ifstream		input;
 	std::ofstream		output_x, output_y, output_z;
@@ -300,10 +247,15 @@ int main(int argc, char *argv[])
 			input >> layer_dat[i][j];
 	}
 	input.close();
+	for (i = 0; i < N_layers; i++)
+	{
+		if (layer_dat[i][0] != 0)
+			layer_dat[i][4] = 0.001*layer_dat[i][0] / layer_dat[i][1];
+	}
     
     
     
-    // Compute U value.
+   	// Compute U value.
 	double U = 0.0;
 	for (i = 0; i < N_layers; i++)
 		U += layer_dat[i][4];
@@ -313,9 +265,9 @@ int main(int argc, char *argv[])
     
 	// Parameters.
 	ord = 20;
-	int p_ord = 4;
+	p_ord = 5;
+    	N_k = 144;
 	N = 50;
-
 
 
 	// STEP ONE: Compute transmission matrix polynomials.
@@ -381,7 +333,7 @@ int main(int argc, char *argv[])
 	Poly NumS_Y(VCD {1.0});
 	Poly DenS_Y = T_01;
 	std::pair<Poly, Poly> PadeS_Y = Pade(DenS_Y, p_ord, p_ord);
-	std::tuple<Poly, Poly, Poly> PadeZ_Y = GetZTF(PadeS_Y.second, Poly(VCD {0, 0, 1}) * PadeS_Y.first, U);
+	std::tuple<Poly, Poly, Poly> PadeZ_Y = GetZTF(PadeS_Y.second, Poly(VCD {0, 0, 1}) * PadeS_Y.first, U, N_k);
 	Poly Yk_Y = std::get<2>(PadeZ_Y);
     std::cout << "Verification of Y: " << std::get<0>(PadeZ_Y).SumCoeffs() / std::get<1>(PadeZ_Y).SumCoeffs() << std::endl;
     
@@ -394,7 +346,7 @@ int main(int argc, char *argv[])
 	}
 	DenS_X = PadeS_Y.first;
 	NumS_X = TaylorRecover(T_00, T_01, DenS_X);
-	std::tuple<Poly, Poly, Poly> PadeZ_X = GetZTF(NumS_X, Poly(VCD {0, 0, 1}) * DenS_X, U);
+	std::tuple<Poly, Poly, Poly> PadeZ_X = GetZTF(NumS_X, Poly(VCD {0, 0, 1}) * DenS_X, U, N_k);
 	Poly Yk_X = std::get<2>(PadeZ_X);
 	std::cout << "Verification of X: " << std::get<0>(PadeZ_X).SumCoeffs() / std::get<1>(PadeZ_X).SumCoeffs() << std::endl;
     
@@ -407,126 +359,30 @@ int main(int argc, char *argv[])
 	}
     DenS_Z = PadeS_Y.first;
 	NumS_Z = TaylorRecover(T_11, T_01, DenS_Z);
-	std::tuple<Poly, Poly, Poly> PadeZ_Z = GetZTF(NumS_Z, Poly(VCD {0, 0, 1}) * DenS_Z, U);
+	std::tuple<Poly, Poly, Poly> PadeZ_Z = GetZTF(NumS_Z, Poly(VCD {0, 0, 1}) * DenS_Z, U, N_k);
 	Poly Yk_Z = std::get<2>(PadeZ_Z);
 	std::cout << "Verification of Z: " << std::get<0>(PadeZ_Z).SumCoeffs() / std::get<1>(PadeZ_Z).SumCoeffs() << std::endl;
+	std::cout << std::endl;
 
 
     
-    // DEBUG
-    std::cout << "a_k: " << std::endl;
-    std::get<0>(PadeZ_X).Print(p_ord, 1);
-    std::cout << "b_k: " << std::endl;
-    std::get<0>(PadeZ_Y).Print(p_ord, 1);
-    std::cout << "c_k: " << std::endl;
-    std::get<0>(PadeZ_Z).Print(p_ord, 1);
-    std::cout << "d_k: " << std::endl;
-    std::get<1>(PadeZ_Z).Print(p_ord, 1);
-    
-    
-	// OUTPUT
+	// PRINT OUTPUT.
+	std::cout << "In descending order...\n" << std::endl;
+	std::cout << std::setprecision(10) << "a_k: " << std::endl;
+	std::get<0>(PadeZ_X).Print(p_ord, 1); std::cout << "Sum of a_k: " << std::get<0>(PadeZ_X).SumCoeffs() << 	std::endl;
+	std::cout << "\nb_k: " << std::endl;
+	std::get<0>(PadeZ_Y).Print(p_ord, 1);  std::cout << "Sum of b_k: " << std::get<0>(PadeZ_Y).SumCoeffs() << 	std::endl;
+	std::cout << "\nc_k: " << std::endl;
+	std::get<0>(PadeZ_Z).Print(p_ord, 1); std::cout << "Sum of c_k: " << std::get<0>(PadeZ_Z).SumCoeffs() << 	std::endl;
+	std::cout << "\nd_k: " << std::endl;
+	std::get<1>(PadeZ_Z).Print(p_ord, 1);  std::cout << "Sum of d_k: " << std::get<1>(PadeZ_Y).SumCoeffs() << std::endl << std::endl;
 
-        // Test functions.
-	std::pair<Poly, Poly> PadeZ_TX = std::make_pair(Poly(VCD {-0.000002, 0.007967, -1.079924, 9.638386, -18.033953, 9.548379}), Poly(VCD {0, 0.000021, -0.031898, 0.645135, -1.569084, 1.0}));
-	std::pair<Poly, Poly> PadeZ_TY = std::make_pair(Poly(VCD {0.000006, 0.001052, 0.018078, 0.043475, 0.013915, 0.000178}), Poly(VCD {-0.000006, 0.001542, -0.064305, 0.724516, -1.619841, 1.0}));
-	std::pair<Poly, Poly> PadeZ_TZ = std::make_pair(Poly(VCD {-0.000001, 0.001558, -0.392465, 5.392601, -11.874602, 6.953622}), Poly(VCD {0, 0.000048, -0.032915, 0.647673, -1.570709, 1.0}));
-        
-        // Compute sum of 'c' coefficients.
-	double sum_dk = 0.0;
-	for (int i = 0; i < p_ord+1; i++)
-	{
-		if (i > 0)
-			sum_dk += std::get<1>(PadeZ_Y).coeffs[std::get<1>(PadeZ_Y).Degree()-i].real();
-	}
-	double sum_cn_out = (1.0 + sum_dk)*U;
-	std::cout << sum_cn_out << " " << U << std::endl;
+		// Uncomment to print response factors.
+	//std::get<2>(PadeZ_X).Print(std::get<2>(PadeZ_X).Degree(), 1); std::cout << std::endl;
+	//std::get<2>(PadeZ_Y).Print(std::get<2>(PadeZ_Y).Degree(), 1); std::cout << std::endl;
+	//std::get<2>(PadeZ_Z).Print(std::get<2>(PadeZ_Z).Degree(), 1); dstd::cout << std::endl;
 
-	output_x.open("tmp_x");
-	output_y.open("tmp_y");
-	output_z.open("tmp_z");
-	double *x = new double[N];
-	cdouble *theo_00 = new cdouble[N];
-	cdouble *theo_01 = new cdouble[N];
-	cdouble *theo_10 = new cdouble[N];
-	cdouble *theo_11 = new cdouble[N];
-    
-        // Frequency interval.
-	for (i = 0; i < N; i++)
-		x[i] = pow(10, -8.0 + (i-1)*(8.0 - 3.0)/(double)N);
-
-        // Compute exact theoretical frequency characteristics.
-	for (i = 0; i < N; i++)
-	{
-		theo_00[i] = 1.0;
-		theo_01[i] = R_o;
-		theo_10[i] = 0.0;
-		theo_11[i] = 1.0;
-		cdouble tmp_00 = 0.0;
-		cdouble tmp_01 = 0.0;
-		cdouble tmp_10 = 0.0;
-		cdouble tmp_11 = 0.0;
-		cdouble theo_00_i = 0.0;
-		cdouble theo_01_i = 0.0;
-		cdouble theo_10_i = 0.0;
-		cdouble theo_11_i = 0.0;
-		for (int j = 0; j < 1+N_layers; j++)
-		{
-			if (j < N_layers)
-			{
-				double L_j = layer_dat[j][0]*0.001;
-				double k_j = layer_dat[j][1];
-				double rho_j = layer_dat[j][2];
-				double C_pj = layer_dat[j][3];
-				double R_j_ = layer_dat[j][4];
-				double alpha_j = k_j / (rho_j*C_pj);
-
-				if (L_j != 0)
-				{
-					cdouble arg = L_j * sqrt(c(0,x[i]) / alpha_j);
-					tmp_00 = cosh(arg);
-					tmp_01 = sinh(arg) / (k_j * sqrt(c(0,x[i]) / alpha_j));
-					tmp_10 = sinh(arg) * (k_j * sqrt(c(0,x[i]) / alpha_j));
-					tmp_11 = cosh(arg);
-				}
-				else
-				{
-					tmp_00 = 1.0;
-					tmp_01 = R_j_;
-					tmp_10 = 0.0;
-					tmp_11 = 1.0;
-				}
-			}
-			else
-			{
-				tmp_00 = 1.0;
-				tmp_01 = R_i;
-				tmp_10 = 0.0;
-				tmp_11 = 1.0;
-			}
-
-			theo_00_i = tmp_00*theo_00[i] + tmp_01*theo_10[i];
-			theo_01_i = tmp_00*theo_01[i] + tmp_01*theo_11[i];
-			theo_10_i = tmp_10*theo_00[i] + tmp_11*theo_10[i];
-			theo_11_i = tmp_10*theo_01[i] + tmp_11*theo_11[i];
-			theo_00[i] = theo_00_i;
-			theo_01[i] = theo_01_i;
-			theo_10[i] = theo_10_i;
-			theo_11[i] = theo_11_i;
-		}
-	}
-
-        // Print to output file.
-	for (i = 0; i < N; i++)
-	{
-		output_x << x[i] << " " << fabs(T_00.Eval(c(0,x[i])) / T_01.Eval(c(0,x[i]))) << " " << fabs(NumS_X.Eval(c(0,x[i])) / DenS_X.Eval(c(0,x[i]))) << " " << fabs(std::get<0>(PadeZ_X).Eval(exp(c(0,TIME_STEP*x[i]))) / std::get<1>(PadeZ_X).Eval(exp(c(0,TIME_STEP*x[i])))) << " " << fabs(PadeZ_TX.first.Eval(exp(c(0,TIME_STEP*x[i]))) / PadeZ_TX.second.Eval(exp(c(0,TIME_STEP*x[i])))) << " " << arg(T_00.Eval(c(0,x[i])) / T_01.Eval(c(0,x[i]))) << " " << arg(NumS_X.Eval(c(0,x[i])) / DenS_X.Eval(c(0,x[i]))) << " " << arg(std::get<0>(PadeZ_X).Eval(exp(c(0,TIME_STEP*x[i]))) / std::get<1>(PadeZ_X).Eval(exp(c(0,TIME_STEP*x[i])))) << " " << arg(PadeZ_TX.first.Eval(exp(c(0,TIME_STEP*x[i]))) / PadeZ_TX.second.Eval(exp(c(0,TIME_STEP*x[i])))) << " " << fabs( theo_00[i] / theo_01[i] ) << " " << arg( theo_00[i] / theo_01[i] ) << " " << fabs( Yk_X.Eval(exp(-c(0.0, x[i]*TIME_STEP))) ) << " " << arg( Yk_X.Eval(exp(-c(0.0, x[i]*TIME_STEP))) ) << std::endl;
-
-		output_y << x[i] << " " << fabs(NumS_Y.Eval(c(0,x[i])) / DenS_Y.Eval(c(0,x[i]))) << " " << fabs(PadeS_Y.second.Eval(c(0,x[i])) / PadeS_Y.first.Eval(c(0,x[i]))) << " " << fabs(std::get<0>(PadeZ_Y).Eval(exp(c(0,TIME_STEP*x[i]))) / std::get<1>(PadeZ_Y).Eval(exp(c(0,TIME_STEP*x[i])))) << " " << fabs(PadeZ_TY.first.Eval(exp(c(0,TIME_STEP*x[i]))) / PadeZ_TY.second.Eval(exp(-c(0,TIME_STEP*x[i])))) << " " << arg(NumS_Y.Eval(c(0,x[i])) / DenS_Y.Eval(c(0,x[i]))) << " " << arg(PadeS_Y.second.Eval(c(0,x[i])) / PadeS_Y.first.Eval(c(0,x[i]))) << " " << arg(std::get<0>(PadeZ_Y).Eval(exp(c(0,TIME_STEP*x[i]))) / std::get<1>(PadeZ_Y).Eval(exp(c(0,TIME_STEP*x[i])))) << " " << arg(PadeZ_TY.first.Eval(exp(c(0,TIME_STEP*x[i]))) / PadeZ_TY.second.Eval(exp(c(0,TIME_STEP*x[i])))) << " " << fabs( 1.0 / theo_01[i] ) << " " << arg( 1.0 / theo_01[i] ) << " " << fabs( Yk_Y.Eval(exp(-c(0.0, x[i]*TIME_STEP))) ) << " " << arg( Yk_Y.Eval(exp(-c(0.0, x[i]*TIME_STEP))) ) << std::endl;
-
-		output_z << x[i] << " " << fabs(T_11.Eval(c(0,x[i])) / T_01.Eval(c(0,x[i]))) << " " << fabs(NumS_Z.Eval(c(0,x[i])) / DenS_Z.Eval(c(0,x[i]))) << " " << fabs(std::get<0>(PadeZ_Z).Eval(exp(c(0,TIME_STEP*x[i]))) / std::get<1>(PadeZ_Z).Eval(exp(c(0,TIME_STEP*x[i])))) << " " << fabs(PadeZ_TZ.first.Eval(exp(c(0,TIME_STEP*x[i]))) / PadeZ_TZ.second.Eval(exp(c(0,TIME_STEP*x[i])))) << " " << arg(T_11.Eval(c(0,x[i])) / T_01.Eval(c(0,x[i]))) << " " << arg(NumS_Z.Eval(c(0,x[i])) / DenS_Z.Eval(c(0,x[i]))) << " " << arg(std::get<0>(PadeZ_Z).Eval(exp(c(0,TIME_STEP*x[i]))) / std::get<1>(PadeZ_Z).Eval(exp(c(0,TIME_STEP*x[i])))) << " " << arg(PadeZ_TZ.first.Eval(exp(c(0,TIME_STEP*x[i]))) / PadeZ_TZ.second.Eval(exp(c(0,TIME_STEP*x[i])))) << " " << fabs( theo_11[i] / theo_01[i] ) << " " << arg( theo_11[i] / theo_01[i] ) << " " << fabs( Yk_Z.Eval(exp(-c(0.0, x[i]*TIME_STEP))) ) << " " << arg( Yk_Z.Eval(exp(-c(0.0, x[i]*TIME_STEP))) ) << std::endl;
-	}
-	output_x.close();
-	output_y.close();
-	output_z.close();
+	std::cout << "U: " << U << std::endl;
 
 	return 0;
 }

@@ -3,4 +3,10 @@
 0 1 1 1 0.180
 100 1.630 2300 1000 0.06135
 
-# OUTSIDE -> INSIDE
+# FORMAT:
+# (no. layers) (R_outer) (R_inner)
+# L_1 k_1 rho_1 c_p_1 R_1
+# L_2 k_2 rho_2 c_p_2 R_2
+# .
+# L_n k_n rho_n c_p_n R_n
+# .

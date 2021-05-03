@@ -1,3 +1,6 @@
+# Remove reference to mingw64/lib if compiling using Linux system.
+
+LIBS = -L/mingw64/lib -llapack -lblas
+
 all:
-	g++ ctf.cpp -o ctf -L/mingw64/lib -llapack -lblas
-	# g++ ctf.cpp -o ctf -larmadillo -llapack -lblas -pthread
+	g++ ctf.cpp -o ctf $(LIBS)

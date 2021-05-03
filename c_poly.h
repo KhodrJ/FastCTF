@@ -74,7 +74,15 @@ class Poly
 
 			return 0;
 		}
+		int Flip()
+		{
+			VCD coeffs_flipped = {};
+			for (int i = coeffs.size()-1; i >= 0; i--)
+				coeffs_flipped.push_back(coeffs[i]);
 
+			coeffs=  coeffs_flipped;
+			return 0;
+		}
 		int Diff(int k)
 		{
 			if (k > 0)

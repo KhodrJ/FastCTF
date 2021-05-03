@@ -5,8 +5,8 @@
 #include <complex>
 #include <stdlib.h>
 #include <tuple>
+#include <iomanip>
 
-// const double TIME_STEP = 60.00;
 const double TIME_STEP = 3600.00;
 
 using cdouble = std::complex<double>;
@@ -16,7 +16,6 @@ extern "C"
 {
 	extern int dgesv_(int *N, int *NRHS, double *A, int *LDA, int *IPIV, double *B, int *LDB, int *INFO);
 	extern int zhseqr_(char *JOB, char *COMPZ, int *N, int *ILO, int *IHI, cdouble *H, int *LDH, cdouble *W, cdouble *Z, int *LDZ, cdouble *WORK, int *LWORK, int *INFO);
-	extern int zgetrf_(int *M, int *N, cdouble *A, int *LDA, int *IPIV, int *INFO);
 }
 
 inline double factorial(int n)
@@ -50,31 +49,3 @@ inline double min(double a, double b)
 		return b;
 }
 
-inline cdouble Determinant(int N, cdouble *A)
-{
-	cdouble det = 1.0;
-	int *IPIV = new int[N];
-	int INFO;
-
-	zgetrf_(&N, &N, A, &N, IPIV, &INFO);
-
-	/*
-	for (int i = 0; i < N; i++)
-	{
-		for (int j = 0; j < N; j++)
-			std::cout << A[i+j*N] << " ";
-		std::cout << std::endl;
-	}
-	*/
-
-	for (int i = 0; i < N; i++)
-	{
-		det *= A[i*(N+1)];
-		if (i+1 != IPIV[i])
-			det = -det;
-	}
-
-	delete[] IPIV;
-
-	return det;
-}
